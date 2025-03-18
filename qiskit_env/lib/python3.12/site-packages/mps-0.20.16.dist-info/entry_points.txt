@@ -1,0 +1,3 @@
+[console_scripts]
+mps = mps_pkg:main.main
+
