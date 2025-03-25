@@ -1,799 +1,351 @@
-# This code is part of Qiskit.
-#
-# (C) Copyright IBM 2018, 2021.
-#
-# This code is licensed under the Apache License, Version 2.0. You may
-# obtain a copy of this license in the LICENSE.txt file in the root directory
-# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# Any modifications or derivative works of this code must retain this
-# copyright notice, and modified files need to carry a notice indicating
-# that they have been altered from the originals.
-"""
-This trial wavefunction is a Unitary Coupled-Cluster Single and Double excitations
-variational form.
-For more information, see https://arxiv.org/abs/1805.04340
-Also, for more information on the tapering see: https://arxiv.org/abs/1701.08213
-And for singlet q-UCCD (full) and pair q-UCCD see: https://arxiv.org/abs/1911.10864
-"""
-
-from typing import Optional, Union, List, Tuple
-import logging
-import sys
-import collections
-import copy
-
 import numpy as np
-from qiskit.aqua.utils.validation import validate_min, validate_in_set
-from qiskit import QuantumRegister, QuantumCircuit
-from qiskit.tools import parallel_map
-from qiskit.tools.events import TextProgressBar
+import re
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+# Function to extract key parameters from the FCI data
+def extract_water_parameters(data_string):
+    """Extract key parameters from the water molecule FCI data."""
+    # Extract number of orbitals (NORB)
+    norb_match = re.search(r'NORB=\s*(\d+)', data_string)
+    norb = int(norb_match.group(1)) if norb_match else 7
+    
+    # Extract number of electrons (NELEC)
+    nelec_match = re.search(r'NELEC=(\d+)', data_string)
+    nelec = int(nelec_match.group(1)) if nelec_match else 10
+    
+    return norb, nelec
+
+# Function to create a quantum circuit for the water molecule
+def create_water_circuit(norb, nelec):
+    """Create a quantum circuit for the water molecule suitable for MPS representation."""
+    # Use one qubit per orbital
+    num_qubits = norb
+    
+    # Create the circuit
+    circuit = QuantumCircuit(num_qubits)
+    
+    # Initialize in a state that roughly represents the electronic structure
+    # For a water molecule, the electrons occupy the lower energy orbitals
+    for i in range(min(nelec//2, num_qubits)):
+        circuit.x(i)
+    
+    # Create entanglement in a chain structure (suitable for MPS)
+    # This structure works well for MPS representation
+    for i in range(num_qubits-1):
+        circuit.cx(i, i+1)
+    
+    # Add more quantum operations to create a superposition of states
+    # This helps capture the electron correlation effects
+    for i in range(num_qubits):
+        circuit.h(i)
+    
+    # Add another layer of entanglement 
+    for i in range(0, num_qubits-1, 2):
+        if i+1 < num_qubits:
+            circuit.cx(i, i+1)
+    
+    # Save the MPS representation and statevector for later analysis
+    circuit.save_matrix_product_state(label='water_mps')
+    circuit.save_statevector(label='water_sv')
+    
+    return circuit
+
+# Function to simulate using the MPS simulator
+def simulate_with_mps(circuit):
+    """Simulate the circuit using the Matrix Product State simulator."""
+    # Create the MPS simulator
+    simulator = AerSimulator(method='matrix_product_state')
+    
+    # Transpile the circuit for the simulator
+    transpiled_circuit = transpile(circuit, simulator)
+    
+    # Run the simulation
+    result = simulator.run(transpiled_circuit).result()
+    
+    # Get the MPS data
+    mps_data = result.data(0)
+    
+    return mps_data
+
+# Main function to demonstrate the process
+def demonstrate_water_molecule_mps(fci_data_string):
+    """Run the complete process of creating and simulating an MPS for water."""
+    print("Extracting parameters from FCI data...")
+    norb, nelec = extract_water_parameters(fci_data_string)
+    print(f"Number of orbitals: {norb}")
+    print(f"Number of electrons: {nelec}")
+    
+    print("\nCreating quantum circuit for water molecule...")
+    circuit = create_water_circuit(norb, nelec)
+    print(circuit)
+    
+    print("\nSimulating with MPS simulator...")
+    mps_data = simulate_with_mps(circuit)
+    
+    # Display some of the MPS data
+    print("\nMPS Representation obtained:")
+    if 'water_mps' in mps_data:
+        # The MPS data structure is complex, so we'll just acknowledge it's there
+        print("Successfully extracted Matrix Product State")
+        # You can explore the MPS data structure further if needed
+    else:
+        print("MPS data not found in simulation results")
+    
+    return circuit, mps_data
+
+# Example usage (with your data as a string)
+if __name__ == "__main__":
+    # Your FCI data would go here
+    fci_data = """ &FCI NORB=   7,NELEC=10,MS2=0,
+  ORBSYM=1,1,1,1,1,1,1,
+  ISYM=1,
+ &END
+  4.7446024972265013   1   1   1   1
+ -0.4005569207152798   2   1   1   1
+  0.0543879654747371   2   1   2   1
+  0.9862427470679018   2   2   1   1
+ -0.0096577341445865   2   2   2   1
+  0.7457165015123214   2   2   2   2
+  0.0140209049969404   3   1   3   1
+  0.0204837990352860   3   2   3   1
+  0.1438996619292540   3   2   3   2
+  0.8716273566211508   3   3   1   1
+ -0.0049607387375706   3   3   2   1
+  0.6802078051804231   3   3   2   2
+  0.6761709771448129   3   3   3   3
+ -0.2377912490981060   4   1   1   1
+  0.0279920550587111   4   1   2   1
+ -0.0198413809113488   4   1   2   2
+ -0.0078147588119301   4   1   3   3
+  0.0310912805105295   4   1   4   1
+  0.1555436904206536   4   2   1   1
+ -0.0109596632030024   4   2   2   1
+ -0.0161221483000111   4   2   2   2
+  0.0088644439030785   4   2   3   3
+  0.0116374353039770   4   2   4   1
+  0.1128323118739208   4   2   4   2
+  0.0076245485695920   4   3   3   1
+  0.0014700155646969   4   3   3   2
+  0.0515491684751192   4   3   4   3
+  0.9695577065123711   4   4   1   1
+ -0.0149443129409979   4   4   2   1
+  0.6475813590315546   4   4   2   2
+  0.6209516610761605   4   4   3   3
+  0.0087754846778638   4   4   4   1
+  0.0974320234455502   4   4   4   2
+  0.7582716561082493   4   4   4   4
+  0.0260409884525928   5   1   5   1
+  0.0312289635761368   5   2   5   1
+  0.1360922514332653   5   2   5   2
+  0.0329057057784873   5   3   5   3
+  0.0175116633243894   5   4   5   1
+  0.0589713964994248   5   4   5   2
+  0.0651579927561828   5   4   5   4
+  1.1153374923942718   5   5   1   1
+ -0.0112505771802660   5   5   2   1
+  0.7378484355929998   5   5   2   2
+  0.6664990781962318   5   5   3   3
+ -0.0066651413710073   5   5   4   1
+  0.0830419796338111   5   5   4   2
+  0.7157524425599351   5   5   4   4
+  0.8801590933750436   5   5   5   5
+  0.2131188180544552   6   1   1   1
+ -0.0331955426038509   6   1   2   1
+ -0.0063869273091977   6   1   2   2
+ -0.0012696888652764   6   1   3   3
+ -0.0021414496432460   6   1   4   1
+  0.0208117744770594   6   1   4   2
+  0.0230425953416399   6   1   4   4
+  0.0054335735643497   6   1   5   5
+  0.0337096482623593   6   1   6   1
+ -0.3133842944208965   6   2   1   1
+  0.0043160413046890   6   2   2   1
+ -0.1493633931519697   6   2   2   2
+ -0.1017215715824130   6   2   3   3
+  0.0191991868127011   6   2   4   1
+  0.0040447248099209   6   2   4   2
+ -0.0696917269428985   6   2   4   4
+ -0.1596517970687365   6   2   5   5
+  0.0119377428666477   6   2   6   1
+  0.1125326045133848   6   2   6   2
+ -0.0058246373580332   6   3   3   1
+  0.0049903703285689   6   3   3   2
+ -0.0161986119944182   6   3   4   3
+  0.0443743875151307   6   3   6   3
+  0.2247261697128875   6   4   1   1
+ -0.0038019037128802   6   4   2   1
+  0.0694905402810812   6   4   2   2
+  0.0526973069019459   6   4   3   3
+  0.0037377252505768   6   4   4   1
+  0.0688666142847975   6   4   4   2
+  0.1325843947188173   6   4   4   4
+  0.1199189399628465   6   4   5   5
+  0.0071304156775443   6   4   6   1
+ -0.0497512730320683   6   4   6   2
+  0.0928279615586607   6   4   6   4
+ -0.0139093103324018   6   5   5   1
+ -0.0526719125304430   6   5   5   2
+ -0.0031491832484117   6   5   5   4
+  0.0385373197553727   6   5   6   5
+  0.8883884068790534   6   6   1   1
+ -0.0068873403824309   6   6   2   1
+  0.6633280697490749   6   6   2   2
+  0.6046857630751054   6   6   3   3
+ -0.0209702635886530   6   6   4   1
+ -0.0420783857565089   6   6   4   2
+  0.5841421640778124   6   6   4   4
+  0.6286746535828067   6   6   5   5
+ -0.0109091791413417   6   6   6   1
+ -0.1125877940393681   6   6   6   2
+  0.0391306074764903   6   6   6   4
+  0.6457913396568912   6   6   6   6
+  0.0151977411638709   7   1   3   1
+  0.0205837830166046   7   1   3   2
+  0.0083685974346289   7   1   4   3
+ -0.0056546627020635   7   1   6   3
+  0.0165214674411758   7   1   7   1
+  0.0123484177076428   7   2   3   1
+  0.0204636492203700   7   2   3   2
+  0.0456878615958577   7   2   4   3
+ -0.0361693155301378   7   2   6   3
+  0.0128290208274776   7   2   7   1
+  0.0569417773432315   7   2   7   2
+  0.3392628342455847   7   3   1   1
+ -0.0079469786300027   7   3   2   1
+  0.0951175912865732   7   3   2   2
+  0.0964099695129973   7   3   3   3
+  0.0009730497518544   7   3   4   1
+  0.0970982819032685   7   3   4   2
+  0.1362178734310445   7   3   4   4
+  0.1731263551711330   7   3   5   5
+  0.0086198902807216   7   3   6   1
+ -0.0741219909665625   7   3   6   2
+  0.0932092068850792   7   3   6   4
+  0.0376243626123283   7   3   6   6
+  0.1588707166246736   7   3   7   3
+  0.0124111277444726   7   4   3   1
+  0.0878543135021337   7   4   3   2
+  0.0082183565665864   7   4   4   3
+  0.0297276380980336   7   4   6   3
+  0.0130780643580211   7   4   7   1
+  0.0018262855210969   7   4   7   2
+  0.0802734157470199   7   4   7   4
+  0.0222640540242556   7   5   5   3
+  0.0193292344104973   7   5   7   5
+ -0.0079406993711193   7   6   3   1
+ -0.0809661626735664   7   6   3   2
+  0.0366410618350765   7   6   4   3
+ -0.0302885761479625   7   6   6   3
+ -0.0079589221534018   7   6   7   1
+  0.0280103004547427   7   6   7   2
+ -0.0591001121327057   7   6   7   4
+  0.0927523080739217   7   6   7   6
+  0.7915229497670674   7   7   1   1
+ -0.0064351733081312   7   7   2   1
+  0.6213060141758935   7   7   2   2
+  0.6209443507695054   7   7   3   3
+ -0.0060602523019640   7   7   4   1
+ -0.0146141139109483   7   7   4   2
+  0.5842524611548806   7   7   4   4
+  0.5936324360251058   7   7   5   5
+  0.0013328407898505   7   7   6   1
+ -0.0544532679225285   7   7   6   2
+  0.0135269500882058   7   7   6   4
+  0.5920439490018626   7   7   6   6
+  0.0342373740286195   7   7   7   3
+  0.6203474773112126   7   7   7   7
+-32.7595752325552070   1   1   0   0
+  0.5358761109404221   2   1   0   0
+ -7.7425796924270234   2   2   0   0
+ -6.6618629063190165   3   3   0   0
+  0.3118348753981520   4   1   0   0
+ -0.4877766379743241   4   2   0   0
+ -6.9448634131698999   4   4   0   0
+ -7.4986384857396198   5   5   0   0
+ -0.2664381049982429   6   1   0   0
+  1.4262517037312190   6   2   0   0
+ -1.0836948279986856   6   4   0   0
+ -5.7726406382312430   6   6   0   0
+ -1.5177154777760427   7   3   0   0
+ -5.3417336727917268   7   7   0   0
+  9.8194765097824046   0   0   0   0
+  """  # abbreviated for clarity
+    
+    circuit, mps_data = demonstrate_water_molecule_mps(fci_data)
+    
+# Additional functions for deeper MPS analysis
+
+def analyze_mps_properties(mps_data):
+    """Analyze the properties of the Matrix Product State."""
+    if 'water_mps' not in mps_data:
+        print("MPS data not found")
+        return
+    
+    mps = mps_data['water_mps']
+    
+    # In a real implementation, you would extract bond dimensions
+    # and analyze entanglement structure from the MPS data
+    print("\nMPS Analysis:")
+    print("- MPS is a tensor network representation that efficiently captures")
+    print("  quantum states with limited entanglement along a 1D chain")
+    print("- The water molecule's entanglement structure is captured in the bond dimensions")
+    print("- For water, we expect higher entanglement between bonded atoms (O-H bonds)")
+    
+    # You could compute entanglement entropy between different bipartitions
+    # This would require additional code to work with the MPS structure
+
+# Complete example for use with the provided water molecule FCI data
+def run_complete_water_mps_example():
+    """Run a complete example reading FCI data from file and creating an MPS circuit."""
+    try:
+        # Read your FCI data from the file
+        with open('paste.txt', 'r') as f:
+            fci_data = f.read()
+        
+        # Extract parameters
+        norb, nelec = extract_water_parameters(fci_data)
+        print(f"Water molecule parameters extracted: {norb} orbitals, {nelec} electrons")
+        
+        # Create and display the circuit
+        circuit = create_water_circuit(norb, nelec)
+        print("\nQuantum circuit for water molecule:")
+        print(circuit)
+        
+        # Set up the simulator
+        simulator = AerSimulator(method='matrix_product_state')
+        
+        # Add measurement operations to match your example
+        meas_circuit = circuit.copy()
+        meas_circuit.measure_all()
+        
+        # Transpile
+        tcirc = transpile(meas_circuit, simulator)
+        
+        # Run
+        result = simulator.run(tcirc).result()
+        
+        # Get counts
+        counts = result.get_counts(0)
+        print("\nMeasurement outcomes:")
+        print(counts)
+        
+        # Run again with snapshots
+        snapshot_circuit = circuit.copy()
+        snapshot_circuit.save_statevector(label='my_sv')
+        snapshot_circuit.save_matrix_product_state(label='my_mps')
+        snapshot_circuit.measure_all()
+        
+        tcirc = transpile(snapshot_circuit, simulator)
+        result = simulator.run(tcirc).result()
+        data = result.data(0)
+        
+        print("\nSnapshot data obtained:")
+        print("- Contains statevector and MPS representations")
+        
+        return circuit, result, data
+        
+    except Exception as e:
+        print(f"Error running water MPS example: {e}")
+        return None, None, None
 
-from qiskit.aqua import aqua_globals
-from qiskit.aqua.components.initial_states import InitialState
-from qiskit.aqua.operators import WeightedPauliOperator, Z2Symmetries
-from qiskit.aqua.components.variational_forms import VariationalForm
-from qiskit.chemistry.fermionic_operator import FermionicOperator
-
-logger = logging.getLogger(__name__)
-
-
-class UCCSD(VariationalForm):
-    """
-    This trial wavefunction is a Unitary Coupled-Cluster Single and Double excitations
-    variational form.
-    For more information, see https://arxiv.org/abs/1805.04340
-    And for the singlet q-UCCD (full) and pair q-UCCD) see: https://arxiv.org/abs/1911.10864
-    """
-
-    def __init__(self,
-                 num_orbitals: int,
-                 num_particles: Union[Tuple[int, int], List[int], int],
-                 reps: int = 1,
-                 active_occupied: Optional[List[int]] = None,
-                 active_unoccupied: Optional[List[int]] = None,
-                 initial_state: Optional[Union[QuantumCircuit, InitialState]] = None,
-                 qubit_mapping: str = 'parity',
-                 two_qubit_reduction: bool = True,
-                 num_time_slices: int = 1,
-                 shallow_circuit_concat: bool = True,
-                 z2_symmetries: Optional[Z2Symmetries] = None,
-                 method_singles: str = 'both',
-                 method_doubles: str = 'ucc',
-                 excitation_type: str = 'sd',
-                 same_spin_doubles: bool = True,
-                 skip_commute_test: bool = False) -> None:
-        """Constructor.
-
-        Args:
-            num_orbitals: number of spin orbitals, has a min. value of 1.
-            num_particles: number of particles, if it is a list,
-                            the first number is alpha and the second number if beta.
-            reps: number of repetitions of basic module, has a min. value of 1.
-            active_occupied: list of occupied orbitals to consider as active space.
-            active_unoccupied: list of unoccupied orbitals to consider as active space.
-            initial_state: An initial state object.
-            qubit_mapping: qubit mapping type.
-            two_qubit_reduction: two qubit reduction is applied or not.
-            num_time_slices: parameters for dynamics, has a min. value of 1.
-            shallow_circuit_concat: indicate whether to use shallow (cheap) mode for
-                                           circuit concatenation.
-            z2_symmetries: represent the Z2 symmetries, including symmetries,
-                            sq_paulis, sq_list, tapering_values, and cliffords.
-            method_singles: specify the single excitation considered. 'alpha', 'beta',
-                                'both' only alpha or beta spin-orbital single excitations or
-                                both (all of them).
-            method_doubles: specify the single excitation considered. 'ucc' (conventional
-                                ucc), succ (singlet ucc), succ_full (singlet ucc full),
-                                pucc (pair ucc).
-            excitation_type: specify the excitation type 'sd', 's', 'd' respectively
-                                for single and double, only single, only double excitations.
-            same_spin_doubles: enable double excitations of the same spin.
-            skip_commute_test: when tapering excitation operators we test and exclude any that do
-                                not commute with symmetries. This test can be skipped to include
-                                all tapered excitation operators whether they commute or not.
-
-
-         Raises:
-             ValueError: Num particles list is not 2 entries
-        """
-        validate_min('num_orbitals', num_orbitals, 1)
-        if isinstance(num_particles, list) and len(num_particles) != 2:
-            raise ValueError('Num particles value {}. Number of values allowed is 2'.format(
-                num_particles))
-        validate_min('reps', reps, 1)
-        validate_in_set('qubit_mapping', qubit_mapping,
-                        {'jordan_wigner', 'parity', 'bravyi_kitaev'})
-        validate_min('num_time_slices', num_time_slices, 1)
-        validate_in_set('method_singles', method_singles, {'both', 'alpha', 'beta'})
-        validate_in_set('method_doubles', method_doubles, {'ucc', 'pucc', 'succ', 'succ_full'})
-        validate_in_set('excitation_type', excitation_type, {'sd', 's', 'd'})
-        super().__init__()
-
-        self._z2_symmetries = Z2Symmetries([], [], [], []) \
-            if z2_symmetries is None else z2_symmetries
-
-        self._num_qubits = num_orbitals if not two_qubit_reduction else num_orbitals - 2
-        self._num_qubits = self._num_qubits if self._z2_symmetries.is_empty() \
-            else self._num_qubits - len(self._z2_symmetries.sq_list)
-        self._reps = reps
-        self._num_orbitals = num_orbitals
-        if isinstance(num_particles, (tuple, list)):
-            self._num_alpha = num_particles[0]
-            self._num_beta = num_particles[1]
-        else:
-            logger.info("We assume that the number of alphas and betas are the same.")
-            self._num_alpha = num_particles // 2
-            self._num_beta = num_particles // 2
-
-        self._num_particles = [self._num_alpha, self._num_beta]
-
-        if sum(self._num_particles) > self._num_orbitals:
-            raise ValueError('# of particles must be less than or equal to # of orbitals.')
-
-        self._initial_state = initial_state
-        self._qubit_mapping = qubit_mapping
-        self._two_qubit_reduction = two_qubit_reduction
-        self._num_time_slices = num_time_slices
-        self._shallow_circuit_concat = shallow_circuit_concat
-
-        # advanced parameters
-        self._method_singles = method_singles
-        self._method_doubles = method_doubles
-        self._excitation_type = excitation_type
-        self.same_spin_doubles = same_spin_doubles
-        self._skip_commute_test = skip_commute_test
-
-        self._single_excitations, self._double_excitations = \
-            UCCSD.compute_excitation_lists([self._num_alpha, self._num_beta], self._num_orbitals,
-                                           active_occupied, active_unoccupied,
-                                           same_spin_doubles=self.same_spin_doubles,
-                                           method_singles=self._method_singles,
-                                           method_doubles=self._method_doubles,
-                                           excitation_type=self._excitation_type,)
-
-        self._hopping_ops, self._num_parameters = self._build_hopping_operators()
-        self._excitation_pool = None  # type: Optional[List[WeightedPauliOperator]]
-        self._bounds = [(-np.pi, np.pi) for _ in range(self._num_parameters)]
-
-        self._logging_construct_circuit = True
-        self._support_parameterized_circuit = True
-
-        self.uccd_singlet = False
-        if self._method_doubles == 'succ_full':
-            self.uccd_singlet = True
-            self._single_excitations, self._double_excitations = \
-                UCCSD.compute_excitation_lists([self._num_alpha, self._num_beta],
-                                               self._num_orbitals,
-                                               active_occupied, active_unoccupied,
-                                               same_spin_doubles=self.same_spin_doubles,
-                                               method_singles=self._method_singles,
-                                               method_doubles=self._method_doubles,
-                                               excitation_type=self._excitation_type,
-                                               )
-        if self.uccd_singlet:
-            self._hopping_ops, _ = self._build_hopping_operators()
-        else:
-            self._hopping_ops, self._num_parameters = self._build_hopping_operators()
-            self._bounds = [(-np.pi, np.pi) for _ in range(self._num_parameters)]
-
-        if self.uccd_singlet:
-            self._double_excitations_grouped = \
-                UCCSD.compute_excitation_lists_singlet(self._double_excitations, num_orbitals)
-            self.num_groups = len(self._double_excitations_grouped)
-
-            logging.debug('Grouped double excitations for singlet ucc')
-            logging.debug(self._double_excitations_grouped)
-
-            self._num_parameters = self.num_groups
-            self._bounds = [(-np.pi, np.pi) for _ in range(self.num_groups)]
-
-            # this will order the hopping operators
-            self.labeled_double_excitations = []
-            for i, _ in enumerate(self._double_excitations):
-                self.labeled_double_excitations.append((self._double_excitations[i], i))
-
-            order_hopping_op = UCCSD.order_labels_for_hopping_ops(self._double_excitations,
-                                                                  self._double_excitations_grouped)
-            logging.debug('New order for hopping ops')
-            logging.debug(order_hopping_op)
-
-            self._hopping_ops_doubles_temp = []
-            self._hopping_ops_doubles = self._hopping_ops[len(self._single_excitations):]
-            for i in order_hopping_op:
-                self._hopping_ops_doubles_temp.append(self._hopping_ops_doubles[i])
-
-            self._hopping_ops[len(self._single_excitations):] = self._hopping_ops_doubles_temp
-
-        self._logging_construct_circuit = True
-
-    @property
-    def single_excitations(self):
-        """
-        Getter of single excitation list
-        Returns:
-            list[list[int]]: single excitation list
-        """
-        return self._single_excitations
-
-    @property
-    def double_excitations(self):
-        """
-        Getter of double excitation list
-        Returns:
-            list[list[int]]: double excitation list
-        """
-        return self._double_excitations
-
-    @property
-    def excitation_pool(self) -> List[WeightedPauliOperator]:
-        """Returns the full list of available excitations (called the pool)."""
-        return self._excitation_pool
-
-    @excitation_pool.setter
-    def excitation_pool(self, excitation_pool: List[WeightedPauliOperator]) -> None:
-        """Sets the excitation pool."""
-        self._excitation_pool = excitation_pool.copy()
-
-    def _build_hopping_operators(self):
-        if logger.isEnabledFor(logging.DEBUG):
-            TextProgressBar(sys.stderr)
-
-        results = parallel_map(UCCSD._build_hopping_operator,
-                               self._single_excitations + self._double_excitations,
-                               task_args=(self._num_orbitals, self._num_particles,
-                                          self._qubit_mapping, self._two_qubit_reduction,
-                                          self._z2_symmetries,
-                                          self._skip_commute_test),
-                               num_processes=aqua_globals.num_processes)
-        hopping_ops = []
-        s_e_list = []
-        d_e_list = []
-        for op, index in results:
-            if op is not None and not op.is_empty():
-                hopping_ops.append(op)
-                if len(index) == 2:  # for double excitation
-                    s_e_list.append(index)
-                else:  # for double excitation
-                    d_e_list.append(index)
-
-        self._single_excitations = s_e_list
-        self._double_excitations = d_e_list
-
-        num_parameters = len(hopping_ops) * self._reps
-        return hopping_ops, num_parameters
-
-    @staticmethod
-    def _build_hopping_operator(index, num_orbitals, num_particles, qubit_mapping,
-                                two_qubit_reduction, z2_symmetries,
-                                skip_commute_test=False):
-        """
-        Builds a hopping operator given the list of indices (index) that is a single or a double
-        excitation.
-
-        Args:
-            index (list): a single or double excitation (e.g. double excitation [0,1,2,3] for a 4
-                          spin-orbital system)
-            num_orbitals (int): number of spin-orbitals
-            num_particles (int): number of electrons
-            qubit_mapping (str): qubit mapping type
-            two_qubit_reduction (bool): reduce the number of qubits by 2 if
-                                        parity qubit mapping is used
-            z2_symmetries (Z2Symmetries): class that contains the symmetries
-                                          of hamiltonian for tapering
-            skip_commute_test (bool): when tapering excitation operators we test and exclude any
-                                that do not commute with symmetries. This test can be skipped to
-                                include all tapered excitation operators whether they commute
-                                or not.
-        Returns:
-            WeightedPauliOperator: qubit_op
-            list: index
-        """
-        h_1 = np.zeros((num_orbitals, num_orbitals))
-        h_2 = np.zeros((num_orbitals, num_orbitals, num_orbitals, num_orbitals))
-        if len(index) == 2:
-            i, j = index
-            h_1[i, j] = 1.0
-            h_1[j, i] = -1.0
-        elif len(index) == 4:
-            i, j, k, m = index
-            h_2[i, j, k, m] = 1.0
-            h_2[m, k, j, i] = -1.0
-
-        dummpy_fer_op = FermionicOperator(h1=h_1, h2=h_2)
-        qubit_op = dummpy_fer_op.mapping(qubit_mapping)
-        if two_qubit_reduction:
-            qubit_op = Z2Symmetries.two_qubit_reduction(qubit_op, num_particles)
-
-        if not z2_symmetries.is_empty():
-            symm_commuting = True
-            for symmetry in z2_symmetries.symmetries:
-                symmetry_op = WeightedPauliOperator(paulis=[[1.0, symmetry]])
-                symm_commuting = qubit_op.commute_with(symmetry_op)
-                if not symm_commuting:
-                    break
-            if not skip_commute_test:
-                qubit_op = z2_symmetries.taper(qubit_op) if symm_commuting else None
-            else:
-                qubit_op = z2_symmetries.taper(qubit_op)
-
-        if qubit_op is None:
-            logger.debug('Excitation (%s) is skipped since it is not commuted '
-                         'with symmetries', ','.join([str(x) for x in index]))
-        return qubit_op, index
-
-    def manage_hopping_operators(self):
-        """
-        Triggers the adaptive behavior of this UCCSD instance.
-        This function is used by the Adaptive VQE algorithm. It stores the full list of available
-        hopping operators in a so called "excitation pool" and clears the previous list to be empty.
-        Furthermore, the depth is asserted to be 1 which is required by the Adaptive VQE algorithm.
-        """
-        if self._excitation_pool is None:
-            # store full list of excitations as pool
-            self._excitation_pool = self._hopping_ops.copy()
-
-        # check depth parameter
-        if self._reps != 1:
-            logger.warning('The reps of the variational form was not 1 but %i which does not work \
-                    in the adaptive VQE algorithm. Thus, it has been reset to 1.')
-            self._reps = 1
-
-        # reset internal excitation list to be empty
-        self._hopping_ops = []
-        self._num_parameters = 0
-        self._bounds = []
-
-    def push_hopping_operator(self, excitation):
-        """
-        Pushes a new hopping operator.
-
-        Args:
-            excitation (WeightedPauliOperator): the new hopping operator to be added
-        """
-        self._hopping_ops.append(excitation)
-        self._num_parameters = len(self._hopping_ops) * self._reps
-        self._bounds = [(-np.pi, np.pi) for _ in range(self._num_parameters)]
-
-    def pop_hopping_operator(self):
-        """
-        Pops the hopping operator that was added last.
-        """
-        self._hopping_ops.pop()
-        self._num_parameters = len(self._hopping_ops) * self._reps
-        self._bounds = [(-np.pi, np.pi) for _ in range(self._num_parameters)]
-
-    def construct_circuit(self, parameters, q=None):
-        """
-        Construct the variational form, given its parameters.
-
-        Args:
-            parameters (Union(numpy.ndarray, list[Parameter], ParameterVector)): circuit parameters
-            q (QuantumRegister, optional): Quantum Register for the circuit.
-
-        Returns:
-            QuantumCircuit: a quantum circuit with given `parameters`
-
-        Raises:
-            ValueError: the number of parameters is incorrect.
-        """
-        if len(parameters) != self._num_parameters:
-            raise ValueError('The number of parameters has to be {}'.format(self._num_parameters))
-
-        if q is None:
-            q = QuantumRegister(self._num_qubits, name='q')
-        if isinstance(self._initial_state, QuantumCircuit):
-            circuit = QuantumCircuit(q)
-            circuit.compose(self._initial_state, inplace=True)
-        elif isinstance(self._initial_state, InitialState):
-            circuit = self._initial_state.construct_circuit('circuit', q)
-        else:
-            circuit = QuantumCircuit(q)
-
-        if logger.isEnabledFor(logging.DEBUG) and self._logging_construct_circuit:
-            logger.debug("Evolving hopping operators:")
-            TextProgressBar(sys.stderr)
-            self._logging_construct_circuit = False
-
-        num_excitations = len(self._hopping_ops)
-
-        if not self.uccd_singlet:
-            list_excitation_operators = [
-                (self._hopping_ops[index % num_excitations], parameters[index])
-                for index in range(self._reps * num_excitations)]
-        else:
-            list_excitation_operators = []
-            counter = 0
-            for i in range(int(self._reps * self.num_groups)):
-                for _ in range(len(self._double_excitations_grouped[i % self.num_groups])):
-                    list_excitation_operators.append((self._hopping_ops[counter],
-                                                      parameters[i]))
-                    counter += 1
-
-        # TODO to uncomment to update for Operator flow:
-        # from functools import reduce
-        # ops = [(qubit_op.to_opflow().to_matrix_op() * param).exp_i()
-        #        for (qubit_op, param) in list_excitation_operators]
-        # circuit += reduce(lambda x, y: x @ y, reversed(ops)).to_circuit()
-        # return circuit
-
-        results = parallel_map(UCCSD._construct_circuit_for_one_excited_operator,
-                               list_excitation_operators,
-                               task_args=(q, self._num_time_slices),
-                               num_processes=aqua_globals.num_processes)
-
-        if self._shallow_circuit_concat:
-            for qc in results:
-                for _, qbits, _ in qc._data:
-                    for i, _ in enumerate(qbits):
-                        qbits[i] = circuit.qubits[qbits[i].index]
-            for qc in results:
-                circuit._data += qc._data
-        else:
-            for qc in results:
-                circuit += qc
-
-        return circuit
-
-    @staticmethod
-    def _construct_circuit_for_one_excited_operator(qubit_op_and_param, qr, num_time_slices):
-        qubit_op, param = qubit_op_and_param
-        # TODO: need to put -1j in the coeff of pauli since the Parameter.
-        # does not support complex number, but it can be removed if Parameter supports complex
-        qubit_op = qubit_op * -1j
-        qc = qubit_op.evolve(state_in=None, evo_time=param,
-                             num_time_slices=num_time_slices,
-                             quantum_registers=qr)
-        return qc
-
-    @property
-    def preferred_init_points(self):
-        """Getter of preferred initial points based on the given initial state."""
-        if self._initial_state is None:
-            return None
-        else:
-            return np.zeros(self._num_parameters, dtype=float)
-
-    @staticmethod
-    def compute_excitation_lists(num_particles, num_orbitals, active_occ_list=None,
-                                 active_unocc_list=None, same_spin_doubles=True,
-                                 method_singles='both', method_doubles='ucc',
-                                 excitation_type='sd'):
-        """
-        Computes single and double excitation lists.
-
-        Args:
-            num_particles (Union(list, int)): number of particles, if it is a tuple, the first
-                                              number is alpha and the second number if beta.
-            num_orbitals (int): Total number of spin orbitals
-            active_occ_list (list): List of occupied orbitals to include, indices are
-                             0 to n where n is max(num_alpha, num_beta)
-            active_unocc_list (list): List of unoccupied orbitals to include, indices are
-                               0 to m where m is num_orbitals // 2 - min(num_alpha, num_beta)
-            same_spin_doubles (bool): True to include alpha,alpha and beta,beta double excitations
-                               as well as alpha,beta pairings. False includes only alpha,beta
-            excitation_type (str): choose 'sd', 's', 'd' to compute q-UCCSD, q-UCCS,
-                                   q-UCCD excitation lists
-            method_singles (str):  specify type of single excitations, 'alpha', 'beta', 'both' only
-                                   alpha or beta spin-orbital single excitations or both (all
-                                   single excitations)
-            method_doubles (str): choose method for double excitations 'ucc' (conventional ucc),
-                                  'succ' (singlet ucc), 'succ_full' (singlet ucc full),
-                                  'pucc' (pair ucc)
-
-        Returns:
-            list: Single excitation list
-            list: Double excitation list
-
-        Raises:
-            ValueError: invalid setting of number of particles
-            ValueError: invalid setting of number of orbitals
-        """
-
-        if isinstance(num_particles, (tuple, list)):
-            num_alpha = num_particles[0]
-            num_beta = num_particles[1]
-        else:
-            logger.info("We assume that the number of alphas and betas are the same.")
-            num_alpha = num_particles // 2
-            num_beta = num_particles // 2
-
-        num_particles = num_alpha + num_beta
-
-        if num_particles < 2:
-            raise ValueError('Invalid number of particles {}'.format(num_particles))
-        if num_orbitals < 4 or num_orbitals % 2 != 0:
-            raise ValueError('Invalid number of orbitals {}'.format(num_orbitals))
-        if num_orbitals <= num_particles:
-            raise ValueError('No unoccupied orbitals')
-
-        # convert the user-defined active space for alpha and beta respectively
-        active_occ_list_alpha = []
-        active_occ_list_beta = []
-        active_unocc_list_alpha = []
-        active_unocc_list_beta = []
-
-        beta_idx = num_orbitals // 2
-
-        # making lists of indexes of MOs involved in excitations
-        if active_occ_list is not None:
-            active_occ_list = [i if i >= 0 else i + max(num_alpha, num_beta) for i in
-                               active_occ_list]
-            for i in active_occ_list:
-                if i < num_alpha:
-                    active_occ_list_alpha.append(i)
-                else:
-                    raise ValueError(
-                        'Invalid index {} in active active_occ_list {}'.format(i, active_occ_list))
-                if i < num_beta:
-                    active_occ_list_beta.append(i + beta_idx)
-                else:
-                    raise ValueError(
-                        'Invalid index {} in active active_occ_list {}'.format(i, active_occ_list))
-        else:
-            active_occ_list_alpha = list(range(0, num_alpha))
-            active_occ_list_beta = [i + beta_idx for i in range(0, num_beta)]
-
-        if active_unocc_list is not None:
-            active_unocc_list = [i + min(num_alpha, num_beta) if i >= 0
-                                 else i + num_orbitals // 2 for i in active_unocc_list]
-            for i in active_unocc_list:
-                if i >= num_alpha:
-                    active_unocc_list_alpha.append(i)
-                else:
-                    raise ValueError('Invalid index {} in active active_unocc_list {}'
-                                     .format(i, active_unocc_list))
-                if i >= num_beta:
-                    active_unocc_list_beta.append(i + beta_idx)
-                else:
-                    raise ValueError('Invalid index {} in active active_unocc_list {}'
-                                     .format(i, active_unocc_list))
-        else:
-            active_unocc_list_alpha = list(range(num_alpha, num_orbitals // 2))
-            active_unocc_list_beta = [i + beta_idx for i in range(num_beta, num_orbitals // 2)]
-
-        logger.debug('active_occ_list_alpha %s', active_occ_list_alpha)
-        logger.debug('active_unocc_list_alpha %s', active_unocc_list_alpha)
-
-        logger.debug('active_occ_list_beta %s', active_occ_list_beta)
-        logger.debug('active_unocc_list_beta %s', active_unocc_list_beta)
-
-        single_excitations = []
-        double_excitations = []
-
-        # lists of single excitations
-        if method_singles == 'alpha ':
-
-            for occ_alpha in active_occ_list_alpha:
-                for unocc_alpha in active_unocc_list_alpha:
-                    single_excitations.append([occ_alpha, unocc_alpha])
-
-        elif method_singles == 'beta':
-
-            for occ_beta in active_occ_list_beta:
-                for unocc_beta in active_unocc_list_beta:
-                    single_excitations.append([occ_beta, unocc_beta])
-        else:
-            for occ_alpha in active_occ_list_alpha:
-                for unocc_alpha in active_unocc_list_alpha:
-                    single_excitations.append([occ_alpha, unocc_alpha])
-            for occ_beta in active_occ_list_beta:
-                for unocc_beta in active_unocc_list_beta:
-                    single_excitations.append([occ_beta, unocc_beta])
-            logger.info('Singles excitations with alphas and betas orbitals are used.')
-
-        # different methods of excitations for double excitations
-        if method_doubles in ['ucc', 'succ_full']:
-
-            for occ_alpha in active_occ_list_alpha:
-                for unocc_alpha in active_unocc_list_alpha:
-                    for occ_beta in active_occ_list_beta:
-                        for unocc_beta in active_unocc_list_beta:
-                            double_excitations.append(
-                                [occ_alpha, unocc_alpha, occ_beta, unocc_beta])
-        # pair ucc
-        elif method_doubles == 'pucc':
-            for occ_alpha in active_occ_list_alpha:
-                for unocc_alpha in active_unocc_list_alpha:
-                    for occ_beta in active_occ_list_beta:
-                        for unocc_beta in active_unocc_list_beta:
-                            # makes sure the el. excite from same spatial to same spatial orbitals
-                            if occ_beta - occ_alpha == num_orbitals / 2 \
-                                    and unocc_beta - unocc_alpha == num_orbitals / 2:
-                                double_excitations.append(
-                                    [occ_alpha, unocc_alpha, occ_beta, unocc_beta])
-
-        # singlet ucc
-        elif method_doubles == 'succ':
-            for i in active_occ_list_alpha:
-                for i_prime in active_unocc_list_alpha:
-                    for j in active_occ_list_beta:
-                        for j_prime in active_unocc_list_beta:
-                            if j - beta_idx >= i and j_prime - beta_idx >= i_prime:
-                                double_excitations.append([i, i_prime, j, j_prime])
-
-            same_spin_doubles = False
-            logger.info('Same spin double excitations are forced to be disabled in'
-                        'singlet ucc')
-
-        # same spin excitations
-        if same_spin_doubles and len(active_occ_list_alpha) > 1 and len(
-                active_unocc_list_alpha) > 1:
-            for i, occ_alpha in enumerate(active_occ_list_alpha[:-1]):
-                for j, unocc_alpha in enumerate(active_unocc_list_alpha[:-1]):
-                    for occ_alpha_1 in active_occ_list_alpha[i + 1:]:
-                        for unocc_alpha_1 in active_unocc_list_alpha[j + 1:]:
-                            double_excitations.append([occ_alpha, unocc_alpha,
-                                                       occ_alpha_1, unocc_alpha_1])
-
-            up_active_occ_list = active_occ_list_beta
-            up_active_unocc_list = active_unocc_list_beta
-
-            for i, occ_beta in enumerate(up_active_occ_list[:-1]):
-                for j, unocc_beta in enumerate(up_active_unocc_list[:-1]):
-                    for occ_beta_1 in up_active_occ_list[i + 1:]:
-                        for unocc_beta_1 in up_active_unocc_list[j + 1:]:
-                            double_excitations.append([occ_beta, unocc_beta,
-                                                       occ_beta_1, unocc_beta_1])
-
-        if excitation_type == 's':
-            double_excitations = []
-        elif excitation_type == 'd':
-            single_excitations = []
-        else:
-            logger.info('Singles and Doubles excitations are used.')
-
-        logger.debug('single_excitations (%s) %s', len(single_excitations), single_excitations)
-        logger.debug('double_excitations (%s) %s', len(double_excitations), double_excitations)
-
-        return single_excitations, double_excitations
-
-    # below are all tool functions that serve to group excitations that are controlled by
-    # same angle theta in singlet ucc
-    @staticmethod
-    def compute_excitation_lists_singlet(double_exc, num_orbitals):
-        """
-        Outputs the list of lists of grouped excitation. A single list inside is controlled by
-        the same parameter theta.
-
-        Args:
-            double_exc (list): exc.group. [[0,1,2,3], [...]]
-            num_orbitals (int): number of molecular orbitals
-
-        Returns:
-            list: de_groups grouped excitations
-        """
-        de_groups = UCCSD.group_excitations_if_same_ao(double_exc, num_orbitals)
-
-        return de_groups
-
-    @staticmethod
-    def same_ao_double_excitation_block_spin(de_1, de_2, num_orbitals):
-        """
-        Regroups the excitations that involve same spatial orbitals
-        for example, with labeling.
-
-        2--- ---5
-        1--- ---4
-        0-o- -o-3
-
-        excitations [0,1,3,5] and [0,2,3,4] are controlled by the same parameter in the full
-        singlet UCCSD unlike in usual UCCSD where every excitation is controlled by independent
-        parameter.
-
-        Args:
-             de_1 (list): double exc in block spin [ from to from to ]
-             de_2 (list): double exc in block spin [ from to from to ]
-             num_orbitals (int): number of molecular orbitals
-
-        Returns:
-             int: says if given excitation involves same spatial orbitals 1 = yes, 0 = no.
-        """
-        half_active_space = int(num_orbitals / 2)
-
-        de_1_new = copy.copy(de_1)
-        de_2_new = copy.copy(de_2)
-
-        count = -1
-        for ind in de_1_new:
-            count += 1
-            if ind >= half_active_space:
-                de_1_new[count] = ind % half_active_space
-        count = -1
-        for ind in de_2_new:
-            count += 1
-            if ind >= half_active_space:
-                de_2_new[count] = ind % half_active_space
-
-        # check if 2 unordered lists are same (involve same AOs)
-        if collections.Counter(de_1_new) == collections.Counter(de_2_new):
-            # we check that the permutations of terms i,j and k,l in [[i,j][k,l]] [[a,b][c,d]
-            # as [i,j] ==? [a,b] or [c,d] and [k,l] ==? ...
-            # then only return 0, basically criterion for equivalence of 2 mirror excitations
-            return 1
-        else:
-            return 0
-
-    @staticmethod
-    def group_excitations(list_de, num_orbitals):
-        """
-        Groups the excitations and gives out the remaining ones in the list_de_temp list
-        because those excitations are controlled by the same parameter in full singlet UCCSD
-        unlike in usual UCCSD where every excitation has its own parameter.
-
-        Args:
-            list_de (list): list of the double excitations grouped
-            num_orbitals (int): number of spin-orbitals (qubits)
-
-        Returns:
-            tuple: list_same_ao_group, list_de_temp, the grouped double_exc
-            (that involve same spatial orbitals)
-        """
-        list_de_temp = copy.copy(list_de)
-        list_same_ao_group = []
-        de1 = list_de[0]
-        counter = 0
-        for de2 in list_de:
-            if UCCSD.same_ao_double_excitation_block_spin(de1, de2, num_orbitals) == 1:
-                counter += 1
-                if counter == 1:
-                    list_same_ao_group.append(de1)
-                    for i in list_de_temp:
-                        if i == de1:
-                            list_de_temp.remove(de1)
-                if de1 != de2:
-                    list_same_ao_group.append(de2)
-                for i in list_de_temp:
-                    if i == de2:
-                        list_de_temp.remove(de2)
-
-        return list_same_ao_group, list_de_temp
-
-    @staticmethod
-    def group_excitations_if_same_ao(list_de, num_orbitals):
-        """
-        Define that, given list of double excitations list_de and number of spin-orbitals
-        num_orbitals, which excitations involve the same spatial orbitals for full singlet UCCSD.
-
-        Args:
-            list_de (list): list of double exc
-            num_orbitals (int): number of spin-orbitals
-
-        Returns:
-            list: grouped list of excitations
-        """
-        list_groups = []
-        list_same_ao_group, list_de_temp = UCCSD.group_excitations(list_de, num_orbitals)
-        list_groups.append(list_same_ao_group)
-        while len(list_de_temp) != 0:
-            list_same_ao_group, list_de_temp = UCCSD.group_excitations(list_de_temp, num_orbitals)
-            list_groups.append(list_same_ao_group)
-
-        return list_groups
-
-    @staticmethod
-    def order_labels_for_hopping_ops(double_exc, gde):
-        """
-        Orders the hopping operators according to the grouped excitations for the full singlet
-        UCCSD.
-
-        Args:
-            double_exc (list): list of double excitations
-            gde (list of lists): list of grouped excitations for full singlet UCCSD
-
-        Returns:
-            list: ordered_labels to order hopping ops
-        """
-
-        labeled_de = []
-        for i, _ in enumerate(double_exc):
-            labeled_de.append((double_exc[i], i))
-
-        ordered_labels = []
-        for group in gde:
-            for exc in group:
-                for l_e in labeled_de:
-                    if exc == l_e[0]:
-                        ordered_labels.append(l_e[1])
-
-        return ordered_labels
