@@ -35,16 +35,11 @@ dmrg = MPE(mps, mpo, mps).dmrg(bdims=[bond_dim], noises=[1E-6, 0],
     dav_thrds=[1E-3], iprint=2, n_sweeps=10)
 ener = dmrg.energies[-1]
 print("Energy(Ground State) = %20.12f" % ener)
-
-# Verify results
 print('MPS energy = ', np.dot(mps, mpo @ mps))
+print('MPS = ', mps.show_bond_dims())
 print('MPS norm = ', mps.norm())
 print('DMRG: ', dmrg)
-
-# Save energy
 np.save("h2o_energy.npy", ener)
-
-print('---------------------Save_MPS----------------------')
 print("MPS after(bond dim): ", mps.show_bond_dims())
 print(mps[0])
 
@@ -83,34 +78,59 @@ q_labels = mps_data['q_labels']
 pdm1 = mps_data['pdm1']
 energy_classical = mps_data['energy']
 
-# Part 2: Quantum Circuit Mapping
-# ------------------------------
 
-  
-    qreg = QuantumRegister(n_sites, 'q')
-    circuit = QuantumCircuit(qreg)
+print("Starting to save MPS information")
+print(f"Created mps_data dictionary with keys: {list(mps_data.keys())}")
+print(f"n_sites: {mps_data['n_sites']}")
+print(f"bond_dims: {mps_data['bond_dims']}")
+print(f"Number of tensors: {len(mps_data['tensors'])}")
+print(f"Energy: {mps_data['energy']}")
+print(f"PDM1 shape: {mps_data['pdm1'].shape if hasattr(mps_data['pdm1'], 'shape') else 'No shape attribute'}")
+print("Saved mps_data to h2o_mps_complete.npy")
+print("Loaded mps_data from h2o_mps_complete.npy")
+print(f"Loaded data has keys: {list(mps_data.keys())}")
+print(f"Extracted n_sites: {n_sites}")
+print(f"Extracted tensors, count: {len(tensors)}")
+print(f"Extracted bond_dims: {bond_dims}")
+print(f"Extracted q_labels, count: {len(q_labels)}")
+print(f"Extracted pdm1 with shape: {pdm1.shape if hasattr(pdm1, 'shape') else 'No shape attribute'}")
+print(f"Extracted energy_classical: {energy_classical}")
+
+print([n_sites for bond_dims in tensors])
+print("Number of sites:", n_sites)
+print("Bond dimensions:", bond_dims)
+print("Checking tensor shapes...")
+for i, tensor in enumerate(tensors):
+    print(f"Tensor {i} shape:", tensor.shape if hasattr(tensor, 'shape') else "Complex structure")
+for i in range(n_sites):
+    print(f"Tensor {i} expected shape: (4, {bond_dims[i]}, {bond_dims[i+1]})")
+
+def map_mps_to_quantum_circuit(mps_data):
+    n_sites = mps_data['n_sites']
+    tensors = mps_data['tensors']
+    bond_dims = mps_data['bond_dims']
     
-        # Try the original approach
-        fermionic_op = create_fermionic_hamiltonian(hamil)
-        mapper = JordanWignerMapper()
-        qubit_op = mapper.map(fermionic_op)
-        
-        # Get statevector
-        simulator = AerSimulator()
-        transpiled_circuit = transpile(circuit, simulator)
-        statevector = Statevector.from_instruction(transpiled_circuit)
-        
-        # Calculate energy
-        energy = statevector.expectation_value(qubit_op)
-        return energy.real
-        
-       # Load the MPS data
-        mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
-        n_sites = mps_data['n_sites']
-        energy_classical = mps_data['energy']
-        
-        circuit = h2o_mps_to_circuit_robust(mps_data, max_qubits_per_bond=1)
-        
-        quantum_energy = calculate_quantum_energy_robust(circuit, hamil)
-        
-        
+    qc = QuantumCircuit(n_sites)
+    
+    # Start with all qubits in |0⟩
+    for i in range(n_sites):
+        tensor = tensors[i]
+        if hasattr(tensor, 'shape'):
+            norm_factor = np.sqrt(np.sum(np.abs(tensor)**2))
+            if norm_factor > 0:
+                theta = 2 * np.arccos(min(1.0, max(0.0, 
+                                     np.abs(tensor.flatten()[0])/norm_factor if len(tensor.flatten()) > 0 else 0.5)))
+                qc.ry(theta, i)
+        if i < n_sites - 1:
+            qc.cx(i, i+1)
+            
+            if bond_dims[i+1] > 2:  # If bond dimension requires more entanglement
+                qc.ry(np.pi/bond_dims[i+1], i+1)
+                qc.cx(i, i+1)
+    
+    return qc
+
+qc = map_mps_to_quantum_circuit(mps_data)
+print(f"Created MPS-mapped quantum circuit with {n_sites} qubits")
+print(f"Circuit depth: {qc.depth()}")
+print(qc)

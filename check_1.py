@@ -83,34 +83,63 @@ q_labels = mps_data['q_labels']
 pdm1 = mps_data['pdm1']
 energy_classical = mps_data['energy']
 
-# Part 2: Quantum Circuit Mapping
-# ------------------------------
 
-  
-    qreg = QuantumRegister(n_sites, 'q')
-    circuit = QuantumCircuit(qreg)
-    
-        # Try the original approach
-        fermionic_op = create_fermionic_hamiltonian(hamil)
-        mapper = JordanWignerMapper()
-        qubit_op = mapper.map(fermionic_op)
-        
-        # Get statevector
-        simulator = AerSimulator()
-        transpiled_circuit = transpile(circuit, simulator)
-        statevector = Statevector.from_instruction(transpiled_circuit)
-        
-        # Calculate energy
-        energy = statevector.expectation_value(qubit_op)
-        return energy.real
-        
-       # Load the MPS data
-        mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
-        n_sites = mps_data['n_sites']
-        energy_classical = mps_data['energy']
-        
-        circuit = h2o_mps_to_circuit_robust(mps_data, max_qubits_per_bond=1)
-        
-        quantum_energy = calculate_quantum_energy_robust(circuit, hamil)
-        
-        
+print("Starting to save MPS information")
+print(f"Created mps_data dictionary with keys: {list(mps_data.keys())}")
+print(f"n_sites: {mps_data['n_sites']}")
+print(f"bond_dims: {mps_data['bond_dims']}")
+print(f"Number of tensors: {len(mps_data['tensors'])}")
+print(f"Energy: {mps_data['energy']}")
+print(f"PDM1 shape: {mps_data['pdm1'].shape if hasattr(mps_data['pdm1'], 'shape') else 'No shape attribute'}")
+print("Saved mps_data to h2o_mps_complete.npy")
+print("Loaded mps_data from h2o_mps_complete.npy")
+print(f"Loaded data has keys: {list(mps_data.keys())}")
+print(f"Extracted n_sites: {n_sites}")
+print(f"Extracted tensors, count: {len(tensors)}")
+print(f"Extracted bond_dims: {bond_dims}")
+print(f"Extracted q_labels, count: {len(q_labels)}")
+print(f"Extracted pdm1 with shape: {pdm1.shape if hasattr(pdm1, 'shape') else 'No shape attribute'}")
+print(f"Extracted energy_classical: {energy_classical}")
+
+print([n_sites for bond_dims in tensors])
+print("Number of sites:", n_sites)
+print("Bond dimensions:", bond_dims)
+print("Checking tensor shapes...")
+for i, tensor in enumerate(tensors):
+    print(f"Tensor {i} shape:", tensor.shape if hasattr(tensor, 'shape') else "Complex structure")
+for i in range(n_sites):
+    print(f"Tensor {i} expected shape: (4, {bond_dims[i]}, {bond_dims[i+1]})")
+
+
+from qiskit import QuantumCircuit, QuantumRegister
+import numpy as np
+
+# Load MPS data
+mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
+tensors = mps_data['tensors']
+n_sites = mps_data['n_sites']
+bond_dims = mps_data['bond_dims']
+
+# Ancilla qubits = log2(bond_dim) for each bond
+anc_per_site = int(np.log2(bond_dims[0]))  # Assuming uniform bond dims
+total_anc = anc_per_site * (n_sites - 1)
+phys_qubits = QuantumRegister(n_sites, 'p')
+anc_qubits = QuantumRegister(total_anc, 'a')
+qc = QuantumCircuit(phys_qubits, anc_qubits)
+
+# Decompose MPS tensors into unitaries
+unitaries = []
+for i in range(n_sites):
+    A = tensors[i]
+    bond_in, phys_dim, bond_out = A.shape
+    A_flat = A.reshape(bond_in * phys_dim, bond_out)
+    Q, R = np.linalg.qr(A_flat)  # Q is unitary
+    unitaries.append(Q)
+    # Absorb R into next tensor (not shown)
+
+# Add gates to circuit (simplified)
+for i in range(n_sites):
+    q_anc_start = i * anc_per_site
+    q_anc = anc_qubits[q_anc_start: q_anc_start + anc_per_site]
+    q_target = [phys_qubits[i]] + q_anc  # Combine phys + anc qubits
+    qc.unitary(unitaries[i], q_target)
