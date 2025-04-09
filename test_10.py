@@ -1,116 +1,40 @@
-import numpy as np 
-from scipy.linalg import sqrtm, polar
-from pyblock3.algebra.mpe import MPE 
-from pyblock3.hamiltonian import Hamiltonian 
-from pyblock3.fcidump import FCIDUMP 
-from pyblock3.symbolic.expr import OpElement, OpNames
-from pyblock3.algebra.symmetry import SZ
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
-from qiskit_aer import AerSimulator
-from qiskit.quantum_info import Statevector, Operator
-from qiskit_nature.second_q.operators import FermionicOp
-from qiskit_nature.second_q.mappers import JordanWignerMapper
-from qiskit.primitives import Estimator
-import matplotlib.pyplot as plt
+import numpy as np
+from scipy.linalg import qr
+from qiskit import QuantumCircuit
 
-# Part 1: Classical MPS calculation with DMRG
-# ------------------------------------------
+def mps_to_circuit(num_sites, bond_dims, max_bond_dim=2):
+    qc = QuantumCircuit(num_sites)
+    mps_tensors = []
+    for i in range(num_sites):
+        if i == 0:
+            tensor = np.random.rand(2, bond_dims[0]) + 1j*np.random.rand(2, bond_dims[0])
+            q, _ = qr(tensor, mode='economic')
+            mps_tensors.append(q)
+        elif i == num_sites-1:
+            tensor = np.random.rand(bond_dims[-1], 2) + 1j*np.random.rand(bond_dims[-1], 2)
+            q, _ = qr(tensor.T, mode='economic')
+            mps_tensors.append(q.T)
+        else:
+            tensor = np.random.rand(bond_dims[i-1], 2, bond_dims[i]) + 1j*np.random.rand(bond_dims[i-1], 2, bond_dims[i])
+            reshaped = tensor.reshape(bond_dims[i-1]*2, bond_dims[i])
+            q, _ = qr(reshaped, mode='economic')
+            mps_tensors.append(q.reshape(bond_dims[i-1], 2, bond_dims[i]))
+    for site in reversed(range(num_sites)):
+        if site == num_sites-1:
+            gate = mps_tensors[site]
+            qc.unitary(gate, [site], label=f'U{site}')
+        else:
+            tensor_site = mps_tensors[site]
+            chi_left, d, chi_right = tensor_site.shape
+            gate = np.zeros((4,4), dtype=complex)
+            for s in range(d):
+                gate[0, s*chi_right:(s+1)*chi_right] = tensor_site[0, s, :]
+                M = np.vstack([tensor_site[0, s, :], np.random.rand(3, chi_right) + 1j*np.random.rand(3, chi_right)])
+                Q, _ = qr(M, mode='economic')
+                gate[1:, s*chi_right:(s+1)*chi_right] = Q[1:, :]
+            qc.unitary(gate.reshape(2,2,2,2), [site, site+1], label=f'U{site}')
+    return qc
 
-fd = 'H2O.STO3G.FCIDUMP'
-hamil = Hamiltonian(FCIDUMP(pg='d2h').read(fd), flat=True)
-mpo = hamil.build_qc_mpo()
-mpo, _ = mpo.compress(cutoff=1E-9, norm_cutoff=1E-9)
-print('MPO (compressed) = ', mpo.show_bond_dims())
+circuit = mps_to_circuit(num_sites=4, bond_dims=[2,2,2])
+print(circuit.draw())
 
-# Construct MPS
-bond_dim = 200
-mps = hamil.build_mps(bond_dim)
-
-# Canonicalize MPS
-mps = mps.canonicalize(center=0)
-mps /= mps.norm()
-
-# DMRG optimization
-dmrg = MPE(mps, mpo, mps).dmrg(bdims=[bond_dim], noises=[1E-6, 0],
-    dav_thrds=[1E-3], iprint=2, n_sweeps=10)
-ener = dmrg.energies[-1]
-print("Energy(Ground State) = %20.12f" % ener)
-
-# Verify results
-print('MPS energy = ', np.dot(mps, mpo @ mps))
-print('MPS norm = ', mps.norm())
-print('DMRG: ', dmrg)
-
-# Save energy
-np.save("h2o_energy.npy", ener)
-
-print('---------------------Save_MPS----------------------')
-print("MPS after(bond dim): ", mps.show_bond_dims())
-print(mps[0])
-
-# Calculate one-particle density matrix (1PDM)
-pdm1 = np.zeros((hamil.n_sites, hamil.n_sites))
-for i in range(hamil.n_sites):
-    diop = OpElement(OpNames.D, (i, 0), q_label=SZ(-1, -1, hamil.orb_sym[i]))
-    di = hamil.build_site_mpo(diop)
-    for j in range(hamil.n_sites):
-        djop = OpElement(OpNames.D, (j, 0), q_label=SZ(-1, -1, hamil.orb_sym[j]))
-        dj = hamil.build_site_mpo(djop)
-        # factor 2 due to alpha + beta spins
-        pdm1[i, j] = 2 * np.dot((di @ mps).conj(), dj @ mps)
-
-print("1PDM calculated from classical MPS:")
-print(pdm1)
-print("MPS after(bond dim): ", mps.show_bond_dims())
-np.save("h2o_pdm1.npy", pdm1)
-
-# Save the complete MPS information
-mps_data = {
-    'n_sites': hamil.n_sites,
-    'bond_dims': [int(dim) for dim in mps.show_bond_dims().split('|')],
-    'tensors': [t.data.copy() if hasattr(t, 'data') else t.copy() for t in mps.tensors],
-    'q_labels': [t.q_labels if hasattr(t, 'q_labels') else None for t in mps.tensors],
-    'energy': ener,
-    'pdm1': pdm1
-}
-
-np.save("h2o_mps_complete.npy", mps_data, allow_pickle=True)
-mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
-n_sites = mps_data['n_sites']
-tensors = mps_data['tensors']
-bond_dims = mps_data['bond_dims']
-q_labels = mps_data['q_labels']
-pdm1 = mps_data['pdm1']
-energy_classical = mps_data['energy']
-
-# Part 2: Quantum Circuit Mapping
-# ------------------------------
-
-  
-    qreg = QuantumRegister(n_sites, 'q')
-    circuit = QuantumCircuit(qreg)
-    
-        # Try the original approach
-        fermionic_op = create_fermionic_hamiltonian(hamil)
-        mapper = JordanWignerMapper()
-        qubit_op = mapper.map(fermionic_op)
-        
-        # Get statevector
-        simulator = AerSimulator()
-        transpiled_circuit = transpile(circuit, simulator)
-        statevector = Statevector.from_instruction(transpiled_circuit)
-        
-        # Calculate energy
-        energy = statevector.expectation_value(qubit_op)
-        return energy.real
-        
-       # Load the MPS data
-        mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
-        n_sites = mps_data['n_sites']
-        energy_classical = mps_data['energy']
-        
-        circuit = h2o_mps_to_circuit_robust(mps_data, max_qubits_per_bond=1)
-        
-        quantum_energy = calculate_quantum_energy_robust(circuit, hamil)
-        
-        
