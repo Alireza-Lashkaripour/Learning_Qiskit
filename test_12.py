@@ -96,7 +96,7 @@ if __name__ == "__main__":
     num_sites = 6
     bond_dim = 8
     physical_dim = 2
-    layers = 3
+    layers = 1
     mps = generate_random_mps(num_sites, bond_dim, physical_dim)
     qc = deep_mps_to_circuit(mps, physical_dim, layers)
     print(qc.draw(output="text", reverse_bits=True))
