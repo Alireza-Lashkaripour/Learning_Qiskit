@@ -138,7 +138,7 @@ def pick_largest_block(tensor, qlabels):
             best_block = curr
     return best_block
 
-def truncate_to_target(tensor, site_type, target=2):
+def truncate_to_target(tensor, site_type, target=200):
     if not hasattr(tensor, "ndim") or tensor.ndim == 0:
         return tensor
     if site_type == "first":
@@ -156,7 +156,7 @@ def truncate_to_target(tensor, site_type, target=2):
     else:
         return tensor
 
-def build_circuit_from_mps(mps_data, target_dim=2):
+def build_circuit_from_mps(mps_data, target_dim=200):
     n_sites = mps_data['n_sites']
     tensors_all = mps_data['tensors']
     qlabels_all = mps_data['q_labels']
@@ -199,9 +199,9 @@ qc = build_circuit_from_mps(mps_data, target_dim=2)
 print(qc.draw(output="text", reverse_bits=True))
 sim_density = AerSimulator(method="density_matrix")
 compiled_circuit = transpile(qc, sim_density)
-#job_density = sim_density.run(compiled_circuit).result()
-#data = job_density.data(0)
-#print(data)
+job_density = sim_density.run(compiled_circuit).result()
+data = job_density.data(0)
+print(data)
 
 # Run the simulation. (For density matrix simulation, one shot is sufficient.)
 job_density = sim_density.run(compiled_circuit, shots=1)
