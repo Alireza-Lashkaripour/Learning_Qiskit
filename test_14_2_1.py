@@ -133,10 +133,10 @@ def build_deep_circuit_iterative(mps_data, target_dim=2, layers=3):
                 U_list.append(complete_gate_for_site(dense_tensors[i], "intermediate"))
             U_list.append(complete_gate_for_site(dense_tensors[-1], "last"))
         layer_qc = QuantumCircuit(n_sites)
-        layer_qc.append(UnitaryGate(U_list[0], label="U1_layer"+str(L)), [0, 1])
+        layer_qc.append(UnitaryGate(U_list[0].conj().T, label="U1_layer"+str(L)), [0, 1])
         for i in range(1, n_sites - 1):
-            layer_qc.append(UnitaryGate(U_list[i], label="U"+str(i+1)+"_layer"+str(L)), [i, i+1])
-        layer_qc.append(UnitaryGate(U_list[-1], label="U"+str(n_sites)+"_layer"+str(L)), [n_sites-1])
+            layer_qc.append(UnitaryGate(U_list[i].conj().T, label="U"+str(i+1)+"_layer"+str(L)), [i, i+1])
+        layer_qc.append(UnitaryGate(U_list[-1].conj().T, label="U"+str(n_sites)+"_layer"+str(L)), [n_sites-1])
         full_qc = full_qc.compose(layer_qc)
         # Iterative update (crude): replace current tensors with the dense ones
         mps_updated["tensors"] = dense_tensors
