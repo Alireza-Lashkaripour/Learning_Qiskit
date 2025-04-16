@@ -6,6 +6,7 @@ from qiskit_aer import AerSimulator
 from qiskit_nature.second_q.formats.fcidump import FCIDump
 from qiskit_nature.second_q.formats.fcidump_translator import fcidump_to_problem
 from qiskit_nature.second_q.mappers import JordanWignerMapper
+from qiskit_nature.converters.second_quantization import QubitConverter
 
 def complete_unitary_from_fixed_row(v):
     n = v.shape[0]
@@ -105,7 +106,7 @@ def compute_unitaries_from_mps(mps_data, target_dim=2):
         unitaries.append(U_last)
     return unitaries
 
-def build_deep_circuit_from_mps(mps_data, target_dim=2, num_layers=6):
+def build_deep_circuit_from_mps(mps_data, target_dim=2, num_layers=1):
     n_sites = mps_data["n_sites"]
     qc = QuantumCircuit(n_sites)
     for layer in range(num_layers):
@@ -121,7 +122,7 @@ def build_deep_circuit_from_mps(mps_data, target_dim=2, num_layers=6):
     return qc
 
 mps_data = np.load("h2o_mps_complete.npy", allow_pickle=True).item()
-qc = build_deep_circuit_from_mps(mps_data, target_dim=2, num_layers=256)
+qc = build_deep_circuit_from_mps(mps_data, target_dim=2, num_layers=2)
 print(qc.draw(output="text"))
 simulator = AerSimulator(method="density_matrix")
 compiled_circuit = transpile(qc, simulator)
@@ -132,18 +133,13 @@ density = DensityMatrix(rho)
 fd = FCIDump.from_file("H2O.STO3G.FCIDUMP")
 problem = fcidump_to_problem(fd)
 mapper = JordanWignerMapper()
-qubit_op = mapper.map(problem.hamiltonian.second_q_op())
+qubit_converter = QubitConverter(mapper=mapper, two_qubit_reduction=False)
+qubit_op = qubit_converter.convert(problem.hamiltonian)
 H_mat = qubit_op.to_matrix()
-num_full = qubit_op.num_qubits
-num_circ = qc.num_qubits
-if num_full > num_circ:
-    extra = num_full - num_circ
-    pad = DensityMatrix.from_label("0" * extra)
-    density_extended = density.tensor(pad)
-else:
-    density_extended = density
-exp_value = np.real(np.trace(H_mat @ density_extended.data))
 print("Hamiltonian acts on", qubit_op.num_qubits, "qubits.")
 print("Circuit has", qc.num_qubits, "qubits.")
+if qubit_op.num_qubits != qc.num_qubits:
+    raise ValueError("Dimension mismatch between Hamiltonian and circuit")
+exp_value = np.real(np.trace(H_mat @ density.data))
 print("Measured energy:", exp_value)
 
