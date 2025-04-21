@@ -1,0 +1,6 @@
+H2O Quantum Chemistry Calculation
+---------------------------------
+System: Water molecule (H2O) with STO-3G basis
+Method: Matrix Product State (MPS) with Quantum Circuit
+Number of qubits: 14
+Energy: -74.93191895969873 Hartree
