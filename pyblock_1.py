@@ -44,5 +44,5 @@ tensors = mps_data['tensors']
 bond_dims = mps_data['bond_dims']
 q_labels = mps_data['q_labels']
 energy_classical = mps_data['energy']
-dense_A3 = mps_data['dense_tensors'][3]   # ← site-3 tensor, shape (29,4,19)
+dense_A3 = mps_data['dense_tensors'][5]   # ← site-3 tensor, shape (29,4,19)
 print(dense_A3.shape)
