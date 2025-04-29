@@ -27,31 +27,13 @@ print("Energy(Ground State) = %20.12f" % ener)
 
 np.save("h2o_energy.npy", ener)
 
-print('---------------------Dense Tensor Reconstruction----------------------')
-target_tensor_index = 1
-if target_tensor_index < len(mps.tensors):
-    sparse_tensor_object = mps[target_tensor_index]
-    try:
-        dense_tensor = sparse_tensor_object.to_dense()
-        print(f"Reconstructed Dense Tensor {target_tensor_index} Shape: {dense_tensor.shape}")
-        np.save(f"h2o_dense_tensor_{target_tensor_index}.npy", dense_tensor)
-        print(f"Dense Tensor {target_tensor_index} saved to h2o_dense_tensor_{target_tensor_index}.npy")
-    except AttributeError:
-        print(f"Error: Failed to find a '.to_dense()' method (or similar) for the tensor object at index {target_tensor_index}.")
-        print("Please check the PyBlock3 documentation for the correct method to convert sparse tensors to dense NumPy arrays.")
-    except Exception as e:
-        print(f"An error occurred during dense tensor reconstruction: {e}")
-else:
-    print(f"Error: Index {target_tensor_index} is out of bounds for MPS tensors (Length: {len(mps.tensors)}).")
-
-
-print('---------------------Save_MPS----------------------')
 
 mps_data = {
     'n_sites': hamil.n_sites,
     'bond_dims': [int(dim) for dim in mps.show_bond_dims().split('|')],
     'tensors': [t.data.copy() if hasattr(t, 'data') else t.copy() for t in mps.tensors],
     'q_labels': [t.q_labels if hasattr(t, 'q_labels') else None for t in mps.tensors],
+    'dense_tensors': [t.to_dense() for t in mps.tensors],
     'energy': ener,
 }
 
@@ -62,3 +44,5 @@ tensors = mps_data['tensors']
 bond_dims = mps_data['bond_dims']
 q_labels = mps_data['q_labels']
 energy_classical = mps_data['energy']
+dense_A3 = mps_data['dense_tensors'][3]   # ← site-3 tensor, shape (29,4,19)
+print(dense_A3.shape)
