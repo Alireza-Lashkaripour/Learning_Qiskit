@@ -60,6 +60,7 @@ mps_data = {
     'bond_dims': [int(dim) for dim in mps.show_bond_dims().split('|')],
     'tensors': [t.data.copy() if hasattr(t, 'data') else t.copy() for t in mps.tensors],
     'q_labels': [t.q_labels if hasattr(t, 'q_labels') else None for t in mps.tensors],
+    'dense_tensors': [t.to_dense() for t in mps.tensors],
     'energy': ener,
 }
 
@@ -70,8 +71,8 @@ tensors = mps_data['tensors']
 bond_dims = mps_data['bond_dims']
 q_labels = mps_data['q_labels']
 energy_classical = mps_data['energy']
-
-
+dense_A3 = mps_data['dense_tensors'][5]   # ← site-3 tensor, shape (29,4,19)
+print(dense_A3.shape)
 
 
 
