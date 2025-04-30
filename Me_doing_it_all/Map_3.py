@@ -59,20 +59,15 @@ def contract_mps(tensors):
     if state.shape[-1] == 1:
        state = state.reshape(state.shape[:-1]) 
 
-    # Reshape final tensor (4, 4, ..., 4) into (2, 2, 2, ..., 2) for 2N qubits
     num_qubits = n_sites * 2
     qubit_shape = [2] * num_qubits
     try:
-        # The order of physical indices in 'state' is (site0, site1, ... siteN-1)
-        # Reshape each site's dim 4 -> (2, 2)
-        # Example for N=3: shape (4, 4, 4) -> (2, 2, 2, 2, 2, 2)
         reshaped_state = state.reshape(qubit_shape)
     except ValueError as e:
          print(f"Error reshaping final state tensor: {e}")
          print(f"Expected total size {4**n_sites}, final tensor shape {state.shape}")
          return None
 
-    # Flatten using Fortran order ('F') to match Qiskit's convention (q0 changes fastest)
     state_vector = reshaped_state.flatten(order='F') 
     
     norm = np.linalg.norm(state_vector)
@@ -146,7 +141,6 @@ def main():
         print("Failed to contract MPS.")
         return
         
-    expected_len = 4**n_sites
     expected_len_qubit = 2**num_qubits
     if len(target_state_vector) != expected_len_qubit:
         print(f"Error: Contracted state vector length ({len(target_state_vector)}) != expected 2^{num_qubits}={expected_len_qubit}.")
@@ -161,6 +155,15 @@ def main():
         qc.append(prep, range(num_qubits))
         print("StatePreparation appended successfully.")
         
+        # Print the circuit
+        print("\nQuantum Circuit (mps_prep represents the complex StatePreparation unitary):")
+        try:
+            # Using 'text' drawer; 'mpl' or 'latex' are alternatives if libraries installed
+            print(qc.draw(output='text', fold=120)) 
+        except Exception as draw_err:
+             print(f"Could not draw circuit: {draw_err}")
+             print(qc) 
+
     except Exception as e:
         print(f"Error during StatePreparation: {e}")
         return

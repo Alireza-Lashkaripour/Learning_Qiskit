@@ -2,15 +2,9 @@ import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector, DensityMatrix, SparsePauliOp
 from qiskit.circuit.library import StatePreparation
-
-try:
-    from qiskit_nature.second_q.formats.fcidump import FCIDump
-    from qiskit_nature.second_q.formats.fcidump_translator import fcidump_to_problem 
-    from qiskit_nature.second_q.mappers import JordanWignerMapper
-    qiskit_nature_available = True
-except ImportError:
-    print("Required Qiskit Nature components not found. Please ensure qiskit-nature is installed.")
-    qiskit_nature_available = False
+from qiskit_nature.second_q.formats.fcidump import FCIDump
+from qiskit_nature.second_q.formats.fcidump_translator import fcidump_to_problem 
+from qiskit_nature.second_q.mappers import JordanWignerMapper
 
 def load_mps_data_from_npy(filename="h2o_mps_complete.npy"):
     try:
